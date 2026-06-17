@@ -1,0 +1,143 @@
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#include <xinput.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <objbase.h>
+
+#include <iostream>
+#include <vector>
+#include <thread>
+#include <chrono>
+#include <string>
+#include <stdint.h>
+#include <fstream>
+
+using namespace std;
+
+
+
+int main(int argc, char* argv[])
+{
+    SOCKET sock;
+    struct sockaddr_in addr;
+    XINPUT_STATE prev_state = {0};
+    XINPUT_STATE state;
+
+  string ipaddr;   // IP address of receiver
+  int port    = 4313;   // UDP port
+  int jsnum   = 0;      // which joystick to capture (default: 0)
+  int dzth    = 3500;   // minimum axis threshold to avoid spurious events
+                        // when the joystick is in the "dead zone" - not
+              // quite at zero when not being pushed.
+              // In my small sample set, an X-box controller needed
+              // a much larger dead zone than a generic gamepad.
+  
+  // command line arguments
+  // Convert array to a vector of strings for safer processing
+  vector<string> args(argv, argv + argc);
+
+  // args[0] is always the program path or name
+  cout << "Program Name: " << args[0] << "\n";
+
+  // Loop through the remaining parameters
+  for (size_t i = 1; i < args.size(); ++i) {
+     if (args[i] == "-i" && i + 1 < args.size()) {
+      ipaddr = args[++i];
+    } else if (args[i] == "-p" && i + 1 < args.size()) {
+      port = stoi(args[++i]);
+    } else if (args[i] == "-j" && i + 1 < args.size()) {
+      jsnum = stoi(args[++i]);
+    } else if (args[i] == "-t" && i + 1 < args.size()) {
+      dzth = stoi(args[++i]);
+    } else {
+      cout << "Usage: " << args[0].c_str()
+          << " -i <ip address> [-p <port>][-j <joystick number>] [-t <dead zone threshold>]\n";
+      return 0;
+    }
+  }
+
+  if (ipaddr.empty())
+  {
+    cout << "Enter the IP address of the target computer.\n";
+    cin >> ipaddr;      
+    if (!(inet_pton(AF_INET, ipaddr.c_str(), &(addr.sin_addr)) == 1)){
+            cout << "Invalid IP address format.\n";
+      return -1;
+    }
+  }
+
+  HRESULT hr = CoInitialize(NULL);
+  if (FAILED(hr)) {
+          printf("CoInitialize failed with error code 0x%08X.\n", hr);
+		  return -1;
+  }
+
+  WSADATA wsaData;
+  int wsaStartupResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
+  if (wsaStartupResult != 0) 
+  {
+    printf("WSAStartup failed with error code 0x%08X.\n", wsaStartupResult);
+    return -2;
+  }
+
+  sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  if (sock == INVALID_SOCKET)
+  {
+    cout << "Failed to create UDP transmission socket.\n";
+    return -3;
+  }
+
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+
+  cout << "Press ESC or close the window to exit.\n";
+
+  while (true)
+  {
+    if (GetKeyState(VK_ESCAPE) & 0x8000) break;
+
+    memset(&state, 0, sizeof(XINPUT_STATE)); // TODO: is this necessary?
+    if (XInputGetState(jsnum, &state) != ERROR_SUCCESS)
+        continue;
+
+    // Packet number increments continuously, so only compare actual gamepad state
+    // Don't send update unless the gamepad state has changed
+    // TODO: send occasional update even if the state hasn't changed, to be more tolerant of dropped packets
+    if (prev_state.Gamepad.wButtons      == state.Gamepad.wButtons &&
+        prev_state.Gamepad.bLeftTrigger  == state.Gamepad.bLeftTrigger &&
+        prev_state.Gamepad.bRightTrigger == state.Gamepad.bRightTrigger &&
+        prev_state.Gamepad.sThumbLX      == state.Gamepad.sThumbLX &&
+        prev_state.Gamepad.sThumbLY      == state.Gamepad.sThumbLY &&
+        prev_state.Gamepad.sThumbRX      == state.Gamepad.sThumbRX &&
+        prev_state.Gamepad.sThumbRY      == state.Gamepad.sThumbRY
+        ) {
+        continue;
+    }
+
+    uint8_t packet[sizeof(XINPUT_GAMEPAD)];
+	memcpy(packet, &(state.Gamepad), sizeof(XINPUT_GAMEPAD)); // TODO can sendto() take state.Gamepad directly without copying to a separate packet variable?
+
+    if (sendto(sock, (const char*)&packet, sizeof(packet), 0, (struct sockaddr*)&addr, sizeof(addr)) != sizeof(packet)) {
+        cout << "Failed to send update packet.\n";
+    }
+
+    // save state for next comparison
+    prev_state.Gamepad.wButtons = state.Gamepad.wButtons;
+    prev_state.Gamepad.bLeftTrigger = state.Gamepad.bLeftTrigger;
+    prev_state.Gamepad.bRightTrigger = state.Gamepad.bRightTrigger;
+    prev_state.Gamepad.sThumbLX = state.Gamepad.sThumbLX;
+    prev_state.Gamepad.sThumbLY = state.Gamepad.sThumbLY;
+    prev_state.Gamepad.sThumbRX = state.Gamepad.sThumbRX;
+    prev_state.Gamepad.sThumbRY = state.Gamepad.sThumbRY;
+    
+    // delay before next update
+    this_thread::sleep_for(chrono::milliseconds(1));
+  }
+
+  closesocket(sock);
+  WSACleanup();
+  CoUninitialize();
+
+  return 0;
+}
