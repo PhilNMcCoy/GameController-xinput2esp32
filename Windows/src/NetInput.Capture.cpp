@@ -19,10 +19,9 @@ using namespace std;
 
 int main(int argc, char* argv[])
 {
-    SOCKET sock;
-    struct sockaddr_in addr;
-    XINPUT_STATE prev_state = {0};
-    XINPUT_STATE state;
+  
+ XINPUT_STATE prev_state = {0};
+ XINPUT_STATE state;
 
   string ipaddr;   // IP address of receiver
   int port    = 4313;   // UDP port
@@ -36,9 +35,6 @@ int main(int argc, char* argv[])
   // command line arguments
   // Convert array to a vector of strings for safer processing
   vector<string> args(argv, argv + argc);
-
-  // args[0] is always the program path or name
-  cout << "Program Name: " << args[0] << "\n";
 
   // Loop through the remaining parameters
   for (size_t i = 1; i < args.size(); ++i) {
@@ -62,35 +58,48 @@ int main(int argc, char* argv[])
       cout << "Enter the IP address of the target computer.\n";
       cin >> ipaddr;
   }
-  if (!(inet_pton(AF_INET, ipaddr.c_str(), &(addr.sin_addr)) == 1)) {
-      cout << "Invalid IP address format.\n";
-      return -1;
-  }
 
   if (FAILED(CoInitialize(NULL))) {
       cout << "CoInitialize failed";
-	  return -1;
+	  return 1;
   }
 
   WSADATA wsaData;
-  int wsaStartupResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
-  if (wsaStartupResult != 0) 
+  int wsaResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
+  if (wsaResult != 0) 
   {
-    printf("WSAStartup failed with error code 0x%08X.\n", wsaStartupResult);
-    return -2;
-  }
+      cerr << "WSAStartup failed with error: " << wsaResult << "\n";
+      return 1;
+      }
 
-  sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  
+  SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if (sock == INVALID_SOCKET)
   {
-    cout << "Failed to create UDP transmission socket.\n";
-    return -3;
+    cerr << "Socket creation failed with error: " << WSAGetLastError() << "\n";
+	WSACleanup();
+    return 1;
   }
 
+  sockaddr_in addr;
   addr.sin_family = AF_INET;
   addr.sin_port = htons(port);
 
+  // Convert string IP to network binary
+  int ptonResult = inet_pton(AF_INET, ipaddr.c_str(), &addr.sin_addr);
+  if (ptonResult <= 0) {
+      if (ptonResult == 0) {
+          cerr << "Error: Invalid IP string formatting.\n";
+      } else {
+          cerr << "inet_pton failed with error: " << WSAGetLastError() << "\n";
+      }
+      closesocket(sock);
+      WSACleanup();
+      return 1;
+  }
+
   cout << "Press ESC or close the window to exit.\n";
+  int unchanged_count = 0;
 
   while (true)
   {
@@ -98,22 +107,24 @@ int main(int argc, char* argv[])
       if (XInputGetState(jsnum, &state) != ERROR_SUCCESS) { continue; }
 
     // Packet number increments continuously, so only compare actual gamepad state
-    // Don't send update unless the gamepad state has changed
-    // TODO: send occasional update even if the state hasn't changed, to be more tolerant of dropped packets
-    if (prev_state.Gamepad.wButtons      == state.Gamepad.wButtons &&
-        prev_state.Gamepad.bLeftTrigger  == state.Gamepad.bLeftTrigger &&
-        prev_state.Gamepad.bRightTrigger == state.Gamepad.bRightTrigger &&
-        prev_state.Gamepad.sThumbLX      == state.Gamepad.sThumbLX &&
-        prev_state.Gamepad.sThumbLY      == state.Gamepad.sThumbLY &&
-        prev_state.Gamepad.sThumbRX      == state.Gamepad.sThumbRX &&
-        prev_state.Gamepad.sThumbRY      == state.Gamepad.sThumbRY
-        ) {
-        continue;
-    }
+    // Send occasional update even if the state hasn't changed,
+    // to be more tolerant of dropped packets
+      if ((unchanged_count++ < 10) &&
+          prev_state.Gamepad.wButtons == state.Gamepad.wButtons &&
+          prev_state.Gamepad.bLeftTrigger == state.Gamepad.bLeftTrigger &&
+          prev_state.Gamepad.bRightTrigger == state.Gamepad.bRightTrigger &&
+          prev_state.Gamepad.sThumbLX == state.Gamepad.sThumbLX &&
+          prev_state.Gamepad.sThumbLY == state.Gamepad.sThumbLY &&
+          prev_state.Gamepad.sThumbRX == state.Gamepad.sThumbRX &&
+          prev_state.Gamepad.sThumbRY == state.Gamepad.sThumbRY
+          ) {
+         continue;
+	  }
 
     if (sendto(sock, (const char*)&(state.Gamepad), sizeof(XINPUT_GAMEPAD), 0, (struct sockaddr*)&addr, sizeof(addr)) != sizeof(XINPUT_GAMEPAD)) {
-        cout << "Failed to send update packet.\n";
+        cerr << "Failed to send update packet; error: " << WSAGetLastError() << "\n";
     }
+	unchanged_count = 0;
 
     // save state for next comparison
     prev_state.Gamepad.wButtons = state.Gamepad.wButtons;
@@ -131,6 +142,5 @@ int main(int argc, char* argv[])
   closesocket(sock);
   WSACleanup();
   CoUninitialize();
-
   return 0;
 }
