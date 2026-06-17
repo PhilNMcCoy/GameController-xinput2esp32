@@ -59,18 +59,17 @@ int main(int argc, char* argv[])
 
   if (ipaddr.empty())
   {
-    cout << "Enter the IP address of the target computer.\n";
-    cin >> ipaddr;      
-    if (!(inet_pton(AF_INET, ipaddr.c_str(), &(addr.sin_addr)) == 1)){
-            cout << "Invalid IP address format.\n";
+      cout << "Enter the IP address of the target computer.\n";
+      cin >> ipaddr;
+  }
+  if (!(inet_pton(AF_INET, ipaddr.c_str(), &(addr.sin_addr)) == 1)) {
+      cout << "Invalid IP address format.\n";
       return -1;
-    }
   }
 
-  HRESULT hr = CoInitialize(NULL);
-  if (FAILED(hr)) {
-          printf("CoInitialize failed with error code 0x%08X.\n", hr);
-		  return -1;
+  if (FAILED(CoInitialize(NULL))) {
+      cout << "CoInitialize failed";
+	  return -1;
   }
 
   WSADATA wsaData;
@@ -95,11 +94,8 @@ int main(int argc, char* argv[])
 
   while (true)
   {
-    if (GetKeyState(VK_ESCAPE) & 0x8000) break;
-
-    memset(&state, 0, sizeof(XINPUT_STATE)); // TODO: is this necessary?
-    if (XInputGetState(jsnum, &state) != ERROR_SUCCESS)
-        continue;
+      if (GetKeyState(VK_ESCAPE) & 0x8000) { break; }
+      if (XInputGetState(jsnum, &state) != ERROR_SUCCESS) { continue; }
 
     // Packet number increments continuously, so only compare actual gamepad state
     // Don't send update unless the gamepad state has changed
@@ -115,10 +111,7 @@ int main(int argc, char* argv[])
         continue;
     }
 
-    uint8_t packet[sizeof(XINPUT_GAMEPAD)];
-	memcpy(packet, &(state.Gamepad), sizeof(XINPUT_GAMEPAD)); // TODO can sendto() take state.Gamepad directly without copying to a separate packet variable?
-
-    if (sendto(sock, (const char*)&packet, sizeof(packet), 0, (struct sockaddr*)&addr, sizeof(addr)) != sizeof(packet)) {
+    if (sendto(sock, (const char*)&(state.Gamepad), sizeof(XINPUT_GAMEPAD), 0, (struct sockaddr*)&addr, sizeof(addr)) != sizeof(XINPUT_GAMEPAD)) {
         cout << "Failed to send update packet.\n";
     }
 
