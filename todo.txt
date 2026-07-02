@@ -1,3 +1,2 @@
-finish Windows NetInput
 Arduino terminal over WiFi instead of USB
 Driver station gui?  Javascript from ESP32 web server?
