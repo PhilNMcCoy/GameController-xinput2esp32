@@ -1,0 +1,2 @@
+# This file contains local network name & password, so should never be committed
+wifi_network.h
